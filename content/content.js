@@ -33,12 +33,29 @@
       createOverlay();
     }
 
-    const content = adapter.extractContent();
-    if (!content) {
-      alert('Could not extract song content.');
-      return;
-    }
+    // Retry logic for SPAs (like Ultimate Guitar) where content might load late
+    let attempts = 0;
+    const maxAttempts = 10; // Try for 2 seconds (200ms * 10)
+    
+    const tryExtract = () => {
+        const content = adapter.extractContent();
+        if (content) {
+            // Success!
+            initializeContent(content);
+        } else {
+            attempts++;
+            if (attempts < maxAttempts) {
+                setTimeout(tryExtract, 200);
+            } else {
+                alert('Could not extract song content. The page might not be fully loaded yet.');
+            }
+        }
+    };
+    
+    tryExtract();
+  }
 
+  function initializeContent(content) {
     // Prepare content
     contentContainer.innerHTML = '';
     contentContainer.appendChild(content);
@@ -62,6 +79,8 @@
       document.body.style.overflow = 'hidden'; // Prevent scrolling on main page
     });
   }
+
+
 
   function createOverlay() {
     overlay = document.createElement('div');
@@ -183,77 +202,141 @@
   }
 
   function prepareBlocks() {
-    const root = contentContainer.firstElementChild;
+    let root = contentContainer.firstElementChild;
     if (!root) return;
 
-    // Heuristic: Does it have many block children?
-    const blockTags = ['DIV', 'P', 'SECTION', 'PRE'];
-    const hasBlockChildren = Array.from(root.children).some(child => blockTags.includes(child.tagName));
+    // TARGET SELECTION STRATEGY:
+    // 1. If root IS a PRE tag, use it directly
+    // 2. Otherwise look for a PRE tag inside
+    // 3. If not found, drill down through single-child wrappers
 
-    if (hasBlockChildren) {
-        Array.from(root.children).forEach((child, i) => {
+    let targetNode = root;
+
+    if (root.tagName === 'PRE') {
+        // Root is already the PRE, use it directly
+        targetNode = root;
+    } else {
+        // Look for PRE inside
+        const pre = root.querySelector('pre');
+        if (pre) {
+            targetNode = pre;
+        } else {
+            // Fallback: Drill down if only one element child (e.g. div > div > content)
+            while (targetNode.children.length === 1 && ['DIV', 'SECTION'].includes(targetNode.firstElementChild.tagName)) {
+                 targetNode = targetNode.firstElementChild;
+            }
+        }
+    }
+    
+    // Now we have our targetNode (e.g. the PRE tag).
+    // We want to replace the *content* of contentContainer with the split blocks from targetNode.
+    // But we must preserve the styling of targetNode (e.g. font-family of pre).
+
+    // NEW: Strip UI elements from PRE (Ultimate Guitar adds DIVs for close buttons etc.)
+    if (targetNode.tagName === 'PRE') {
+        // Remove any DIV children that are UI elements (short content like "X")
+        // Performance: PRE tags usually have very few DIV children (often just 1 or 2 UI elements),
+        // so querySelectorAll is fast enough here.
+        Array.from(targetNode.querySelectorAll('div')).forEach(div => {
+            if (div.textContent.trim().length <= 2) {
+                div.remove();
+            }
+        });
+    }
+    
+    const originalTag = targetNode.tagName;
+    const originalClasses = targetNode.className;
+    
+    // Check if it's already "blocked" (has block children like P or DIV)
+    // If we found a PRE, it likely contains text/spans, not divs, so we proceed to split.
+    // If it's a DIV, it might already have paragraphs.
+    
+    const blockTags = ['DIV', 'P', 'SECTION', 'TABLE', 'UL', 'OL'];
+    // Note: PRE is not in blockTags here because if we found a PRE, we WANT to split its internal text.
+    const hasBlockChildren = Array.from(targetNode.children).some(child => blockTags.includes(child.tagName));
+
+    if (hasBlockChildren && originalTag !== 'PRE') {
+        // It's already structured (e.g. paragraphs). Just make them editable.
+        const fragment = document.createDocumentFragment();
+        Array.from(targetNode.children).forEach((child, i) => {
             child.classList.add('gpm-editable-block');
             child.dataset.gpmId = i;
+            fragment.appendChild(child);
         });
+        
+        contentContainer.innerHTML = '';
+        contentContainer.appendChild(fragment);
         attachClickHandlers();
         return;
     }
 
-    // DOM-based splitting to avoid innerHTML XSS risks
+    // DOM-based splitting for text/mixed content (PRE or text-heavy DIV)
     const newContent = document.createDocumentFragment();
-    let currentBlock = document.createElement('div');
-    currentBlock.className = 'gpm-editable-block';
-    currentBlock.dataset.gpmId = 0;
-    
     let blockIndex = 0;
-    const childNodes = Array.from(root.childNodes); // Snapshot
     
-    const startNewBlock = () => {
-        if (currentBlock.hasChildNodes()) {
-            newContent.appendChild(currentBlock);
-        }
-        blockIndex++;
-        currentBlock = document.createElement('div');
-        currentBlock.className = 'gpm-editable-block';
-        currentBlock.dataset.gpmId = blockIndex;
+    // Helper to create a new block
+    const createBlock = (lines) => {
+        // Use PRE tag if original was PRE to keep styling, otherwise DIV
+        const tag = originalTag === 'PRE' ? 'pre' : 'div';
+        const el = document.createElement(tag);
+        el.className = `gpm-editable-block ${originalClasses}`; 
+        el.dataset.gpmId = blockIndex++;
+        
+        el.style.margin = '0 0 10px 0';
+        el.style.whiteSpace = 'pre-wrap'; 
+        // Force inherit font if it was PRE, just in case class doesn't cover it
+        if (originalTag === 'PRE') el.style.fontFamily = 'inherit'; 
+
+        lines.forEach((frag, idx) => {
+            if (idx > 0) el.appendChild(document.createElement('br'));
+            el.appendChild(frag);
+        });
+        return el;
     };
 
-    for (let i = 0; i < childNodes.length; i++) {
-        const node = childNodes[i];
-        
+    const childNodes = Array.from(targetNode.childNodes);
+    
+    let lineBuffer = document.createDocumentFragment();
+    let lines = []; 
+    
+    const flushLine = () => {
+        lines.push(lineBuffer);
+        lineBuffer = document.createDocumentFragment();
+    };
+    
+    const processNode = (node) => {
         if (node.nodeType === Node.TEXT_NODE) {
-            const text = node.textContent;
-            // Check for double newlines
-            const parts = text.split(/\n\s*\n/);
-            
-            if (parts.length > 1) {
-                parts.forEach((part, index) => {
-                    if (index > 0) startNewBlock();
-                    if (part) currentBlock.appendChild(document.createTextNode(part));
-                });
-            } else {
-                currentBlock.appendChild(node.cloneNode(true));
-            }
+            const parts = node.textContent.split('\n');
+            parts.forEach((part, i) => {
+                if (i > 0) flushLine();
+                if (part) lineBuffer.appendChild(document.createTextNode(part));
+            });
         } else if (node.tagName === 'BR') {
-            // Check if next is BR (Double BR -> Split)
-            const next = childNodes[i+1];
-            if (next && next.tagName === 'BR') {
-                startNewBlock();
-                i++; // Skip next BR
-            } else {
-                currentBlock.appendChild(node.cloneNode(true));
-            }
+            flushLine();
         } else {
-            currentBlock.appendChild(node.cloneNode(true));
+            lineBuffer.appendChild(node.cloneNode(true));
         }
+    };
+    
+    childNodes.forEach(processNode);
+    flushLine(); 
+    
+    // Group into chunks of 4
+    let chunk = [];
+    lines.forEach((lineFrag) => {
+        chunk.push(lineFrag);
+        if (chunk.length >= 4) {
+            newContent.appendChild(createBlock(chunk));
+            chunk = [];
+        }
+    });
+    
+    if (chunk.length > 0) {
+        newContent.appendChild(createBlock(chunk));
     }
     
-    if (currentBlock.hasChildNodes()) {
-        newContent.appendChild(currentBlock);
-    }
-    
-    root.innerHTML = ''; 
-    root.appendChild(newContent);
+    contentContainer.innerHTML = ''; 
+    contentContainer.appendChild(newContent);
     
     attachClickHandlers();
   }

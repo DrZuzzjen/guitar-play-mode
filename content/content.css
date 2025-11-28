@@ -112,7 +112,10 @@
   cursor: default;
   border: 1px solid transparent;
   border-radius: 3px;
-  padding: 2px;
+  padding: 5px; /* Increased padding for easier clicking */
+  break-inside: avoid; /* Prevent blocks from splitting across columns awkwardly */
+  display: block; /* Ensure it takes full width of column */
+  margin-bottom: 10px; /* Spacing between blocks */
 }
 
 .gpm-editing .gpm-editable-block:hover {
