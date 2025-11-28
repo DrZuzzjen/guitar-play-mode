@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "Guitar Play Mode",
+  "version": "1.0",
+  "description": "Distraction-free multi-column view for chords and lyrics.",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.cifraclub.com/*",
+        "*://*.ultimate-guitar.com/*"
+      ],
+      "js": [
+        "content/adapters/index.js",
+        "content/adapters/cifraclub.js",
+        "content/adapters/ultimate-guitar.js",
+        "content/content.js"
+      ],
+      "css": [
+        "content/content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "toggle_play_mode": {
+      "suggested_key": {
+        "default": "Alt+Shift+P"
+      },
+      "description": "Toggle Play Mode"
+    }
+  }
+}

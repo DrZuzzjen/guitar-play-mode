@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+  <div class="container">
+    <h1>Guitar Play Mode</h1>
+    <div id="status-message" class="hidden"></div>
+    <button id="activate-btn" class="primary-btn">Activate Play Mode</button>
+
+    <div class="controls">
+      <label>Default Columns:</label>
+      <div class="column-selector">
+        <button data-cols="auto" class="active">Auto</button>
+        <button data-cols="2">2</button>
+        <button data-cols="3">3</button>
+        <button data-cols="4">4</button>
+      </div>
+    </div>
+
+    <div class="supported-sites">
+      <small>Supported sites: Cifraclub, Ultimate Guitar</small>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+
+</html>
