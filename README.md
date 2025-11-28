@@ -2,6 +2,14 @@
 
 A Chrome extension for guitarists that transforms chord/tab pages into a distraction-free, multi-column view. Say goodbye to constant scrolling while playing!
 
+## Demo
+
+https://github.com/DrZuzzjen/guitar-play-mode/raw/master/demo.mp4
+
+## Quick Download
+
+Download the latest version: [guitar-play-mode.zip](./guitar-play-mode.zip)
+
 ## Features
 
 *   **Distraction-Free**: Fullscreen overlay showing only lyrics and chords.
