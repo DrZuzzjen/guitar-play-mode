@@ -77,6 +77,7 @@
         <button class="gpm-btn" data-cols="4">4</button>
       </div>
       <button id="gpm-edit-btn" class="gpm-action-btn">Edit</button>
+      <button id="gpm-restore-btn" class="gpm-action-btn" style="display: none;">Restore All</button>
       <button id="gpm-close-btn" class="gpm-close-btn">✕</button>
     `;
 
@@ -96,6 +97,7 @@
     });
 
     document.getElementById('gpm-edit-btn').addEventListener('click', toggleEditMode);
+    document.getElementById('gpm-restore-btn').addEventListener('click', restoreAllBlocks);
     document.getElementById('gpm-close-btn').addEventListener('click', closePlayMode);
 
     // Keyboard shortcuts
@@ -165,76 +167,121 @@
   function toggleEditMode() {
     isEditMode = !isEditMode;
     const btn = document.getElementById('gpm-edit-btn');
+    const restoreBtn = document.getElementById('gpm-restore-btn');
     
     if (isEditMode) {
       btn.classList.add('editing');
       btn.textContent = 'Done (ESC)';
       overlay.classList.add('gpm-editing');
+      restoreBtn.style.display = 'block';
     } else {
       btn.classList.remove('editing');
       btn.textContent = 'Edit';
       overlay.classList.remove('gpm-editing');
+      restoreBtn.style.display = 'none';
     }
   }
 
   function prepareBlocks() {
-    // Try to identify blocks.
-    // If we have a PRE, we try to split it into divs if it's not already structured.
-    const pre = contentContainer.querySelector('pre');
-    
-    if (pre) {
-        // Check if it already has block children
-        if (pre.children.length === 0 || pre.querySelector('br')) {
-            // It's likely text with BRs or just newlines.
-            // We'll try to split by double newlines to create "verses".
-            const html = pre.innerHTML;
-            // We use a regex to find double newlines, but we must be careful with tags.
-            // A safer way is to iterate over text nodes, but that's complex.
-            // Let's try a simple split if it looks safe (no complex nesting).
-            
-            // If the content is mostly text and <b>/<span> tags, splitting by \n\n is usually safe enough for display.
-            const parts = html.split(/\n\s*\n/);
-            if (parts.length > 1) {
-                pre.innerHTML = parts.map((part, i) => `<div class="gpm-editable-block" data-gpm-id="${i}">${part}</div>`).join('\n\n');
-            } else {
-                // Just one block
-                pre.classList.add('gpm-editable-block');
-                pre.dataset.gpmId = 0;
-            }
-        } else {
-            // It has children, maybe divs or spans.
-            Array.from(pre.children).forEach((child, i) => {
-                child.classList.add('gpm-editable-block');
-                child.dataset.gpmId = i;
-            });
-        }
-    } else {
-        // Maybe it's a container with divs
-        const children = contentContainer.children;
-        Array.from(children).forEach((child, i) => {
+    const root = contentContainer.firstElementChild;
+    if (!root) return;
+
+    // Heuristic: Does it have many block children?
+    const blockTags = ['DIV', 'P', 'SECTION', 'PRE'];
+    const hasBlockChildren = Array.from(root.children).some(child => blockTags.includes(child.tagName));
+
+    if (hasBlockChildren) {
+        Array.from(root.children).forEach((child, i) => {
             child.classList.add('gpm-editable-block');
             child.dataset.gpmId = i;
         });
+        attachClickHandlers();
+        return;
     }
 
-    // Attach click handlers
-    const blocks = contentContainer.querySelectorAll('.gpm-editable-block');
-    blocks.forEach(block => {
-        block.onclick = (e) => {
-            if (!isEditMode) return;
-            e.stopPropagation();
-            hideBlock(block.dataset.gpmId);
-        };
-    });
+    // DOM-based splitting to avoid innerHTML XSS risks
+    const newContent = document.createDocumentFragment();
+    let currentBlock = document.createElement('div');
+    currentBlock.className = 'gpm-editable-block';
+    currentBlock.dataset.gpmId = 0;
+    
+    let blockIndex = 0;
+    const childNodes = Array.from(root.childNodes); // Snapshot
+    
+    const startNewBlock = () => {
+        if (currentBlock.hasChildNodes()) {
+            newContent.appendChild(currentBlock);
+        }
+        blockIndex++;
+        currentBlock = document.createElement('div');
+        currentBlock.className = 'gpm-editable-block';
+        currentBlock.dataset.gpmId = blockIndex;
+    };
+
+    for (let i = 0; i < childNodes.length; i++) {
+        const node = childNodes[i];
+        
+        if (node.nodeType === Node.TEXT_NODE) {
+            const text = node.textContent;
+            // Check for double newlines
+            const parts = text.split(/\n\s*\n/);
+            
+            if (parts.length > 1) {
+                parts.forEach((part, index) => {
+                    if (index > 0) startNewBlock();
+                    if (part) currentBlock.appendChild(document.createTextNode(part));
+                });
+            } else {
+                currentBlock.appendChild(node.cloneNode(true));
+            }
+        } else if (node.tagName === 'BR') {
+            // Check if next is BR (Double BR -> Split)
+            const next = childNodes[i+1];
+            if (next && next.tagName === 'BR') {
+                startNewBlock();
+                i++; // Skip next BR
+            } else {
+                currentBlock.appendChild(node.cloneNode(true));
+            }
+        } else {
+            currentBlock.appendChild(node.cloneNode(true));
+        }
+    }
+    
+    if (currentBlock.hasChildNodes()) {
+        newContent.appendChild(currentBlock);
+    }
+    
+    root.innerHTML = ''; 
+    root.appendChild(newContent);
+    
+    attachClickHandlers();
+  }
+
+  function attachClickHandlers() {
+      const blocks = contentContainer.querySelectorAll('.gpm-editable-block');
+      blocks.forEach(block => {
+          block.onclick = (e) => {
+              if (!isEditMode) return;
+              e.stopPropagation();
+              hideBlock(block.dataset.gpmId);
+          };
+      });
   }
 
   function hideBlock(id) {
     const block = contentContainer.querySelector(`[data-gpm-id="${id}"]`);
     if (block) {
       block.classList.add('gpm-hidden-block');
-      hiddenBlocks.add(id); // Store as string or int, consistent with dataset
+      hiddenBlocks.add(id);
       saveHiddenBlocks();
     }
+  }
+
+  function restoreAllBlocks() {
+    hiddenBlocks.clear();
+    saveHiddenBlocks();
+    applyHiddenBlocks();
   }
 
   async function loadPreferences() {
@@ -255,6 +302,8 @@
     blocks.forEach(block => {
         if (hiddenBlocks.has(block.dataset.gpmId)) {
             block.classList.add('gpm-hidden-block');
+        } else {
+            block.classList.remove('gpm-hidden-block');
         }
     });
   }
